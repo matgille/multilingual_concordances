@@ -40,8 +40,6 @@ def tree_to_dict_of_nodes(tree: ET._ElementTree, search_lemmas, window, minimal_
             searchable_tokens = current_tokens
         dictionnary[ident] = {"corresp": corresp, "tokens": tokens, "searchable_tokens": searchable_tokens,
                               "localisation": localisation}
-    with open("/home/mgl/Documents/test.json", "w") as output_json:
-        json.dump(dictionnary, output_json)
     return dictionnary
 
 
