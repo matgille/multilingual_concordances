@@ -145,20 +145,19 @@ def normalize_spelling(text_file):
     print("Done")
 
 
-def lemmatisation(fichier, langue):
+def lemmatisation(fichier, langue, out_dir):
     """
         Lemmatisation du fichier XML et réinjection dans le document xml originel.
         :param temoin: le temoin à lemmatiser
         :param division: la division à traiter
         """
-    moteur_transformation = "saxon9he.jar"
+    moteur_transformation = "scripts/saxon9he.jar"
     fichier_sans_extension = fichier.split("/")[-1].replace(".xml", "")
     print(fichier_sans_extension)
-    fichier_xsl = "transformation_pre_lemmatisation.xsl"
+    fichier_xsl = "scripts/transformation_pre_lemmatisation.xsl"
     chemin_vers_fichier = fichier
-    fichier_entree_txt = f'data/{fichier_sans_extension}.tokenized.txt'
-    fichier_normalized = f'data/{fichier_sans_extension}.tokenized.normalized.txt'
-    param_sortie = f"sortie={fichier_entree_txt}"
+    fichier_sortie_txt = f'{out_dir}/{fichier_sans_extension}.tokenized.txt'
+    param_sortie = f"sortie={fichier_sortie_txt}"
     subprocess.run(["java", "-jar",
                     moteur_transformation,
                     chemin_vers_fichier,
@@ -176,16 +175,22 @@ def lemmatisation(fichier, langue):
         if token.text == " ":
             print("removing")
             token.getparent().remove(token)
-    print(fichier_entree_txt)
+    print(fichier_sortie_txt)
     tokens = root.xpath(groupe_words, namespaces=ns_decl)
-    with open(fichier_entree_txt, "w") as output_file:
+    with open(fichier_sortie_txt, "w") as output_file:
         output_file.write("\n".join([token.text.replace("\n", "") for token in tokens]))
 
     if langue == "es":
-        normalize_spelling(fichier_entree_txt)
-        fichier_lemmatise = f'data/{fichier_sans_extension}.lemmatized.txt'
+        normalize_spelling(fichier_sortie_txt)
+        fichier_normalise = f'{out_dir}/{fichier_sans_extension}.normalized.txt'
+        fichier_lemmatise = f'{out_dir}/{fichier_sans_extension}.lemmatized.txt'
+        cmd_sh = ["sh",
+                  "scripts/analyze.sh",
+                  fichier_normalise,
+                  fichier_lemmatise]  # je dois passer par un script externe car un subprocess tourne dans le vide,
+        # pas trouvé pourquoi
+        subprocess.run(cmd_sh)
         texte_lemmatise = txt_to_liste(fichier_lemmatise)
-        fichier_lemmatise = fichier
         n = 1
         for index, mot in enumerate(tokens):
             print("Replacing")
@@ -205,13 +210,13 @@ def lemmatisation(fichier, langue):
             mot.set("pos", pos_position)
 
     elif langue == "la":
-        modele_latin = "model.tar"
+        modele_latin = "scripts/model.tar"
         device = torch.device("cuda") if torch.cuda.is_available() else "cpu"
-        cmd = f"pie tag --device {device} {fichier_entree_txt} " \
+        cmd = f"pie tag --device {device} {fichier_sortie_txt} " \
               f"<{modele_latin},lemma,pos,Person,Numb,Tense,Case,Mood>  --batch_size 2048"
         print(cmd)
-        # subprocess.run(cmd.split())
-        fichier_seul = os.path.splitext(fichier_entree_txt)[0]
+        subprocess.run(cmd.split())
+        fichier_seul = os.path.splitext(fichier_sortie_txt)[0]
         fichier_lemmatise = str(fichier_seul) + "-pie.txt"
         maliste = txt_to_liste(fichier_lemmatise)
         # Nettoyage de la liste
@@ -268,7 +273,7 @@ def main(source, target, query, lang, lemmatize, search_forms, window, out_dir, 
     except FileExistsError:
         pass
     if lemmatize:
-        lemmatisation(source, lang)
+        lemmatisation(source, lang, out_dir)
     source_as_tree = ET.parse(source)
     target_as_tree = ET.parse(target)
     search_lemmas = not search_forms
@@ -289,7 +294,7 @@ if __name__ == '__main__':
     parser.add_argument("-w", "--window", default=1,
                         help="Fenêtre de contexte à droite et à gauche.")
     parser.add_argument("-l", "--lang", default="",
-                        help="Fenêtre de contexte à droite et à gauche.")
+                        help="Langue.")
     parser.add_argument("-o", "--out_dir", default="",
                         help="Répertoire de sortie des résultats.")
     parser.add_argument("-me", "--minimal_element", default="cl",
