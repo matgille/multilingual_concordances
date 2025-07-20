@@ -221,12 +221,6 @@ def lemmatisation(fichier, langue, out_dir):
         maliste = txt_to_liste(fichier_lemmatise)
         # Nettoyage de la liste
         maliste.pop(0)  # on supprime les titres de colonne
-        test_list = list(zip([token.text for token in tokens], maliste))
-        for idx, (token, analysis) in enumerate(test_list):
-            if token.lower().strip() != analysis[0]:
-                print(idx)
-                print(token, analysis)
-                exit(0)
         for index, mot in enumerate(tokens):
             liste_correcte = maliste[index]
             _, cas, mode, nombre, personne, temps, lemme, pos, *autres_arguments = liste_correcte
