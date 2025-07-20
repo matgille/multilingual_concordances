@@ -1,7 +1,8 @@
-# Concordancier multilingue
+# Concordancier multilingue pour l'étude de traductions
 
 
 Cet outil produit des concordances multilingues à partir de corpus structurés en XML-TEI, alignés au segment et annotés lexicalement. 
+Il est pensé pour faciliter l'étude quantitative et qualitative de corpus de traductions.
 
 Des tables de concordance au format HTML sont produites pour chaque requête à partir d'un texte cible ou d'un texte source.
 
@@ -28,7 +29,7 @@ Sont produites des tables au format HTML, CSV et LaTeX: ![alt text](img/exemple.
 
 ---
 
-# Multilingual concordancer
+# Multilingual concordancer for translation studies
 
 
 
