@@ -1,7 +1,6 @@
 import json
 
 import lxml.etree as ET
-import sys
 import subprocess
 import re
 import os
@@ -14,9 +13,9 @@ tei_namespace = 'http://www.tei-c.org/ns/1.0'
 ns_decl = {'tei': tei_namespace}
 
 
-def tree_to_dict_of_nodes(tree: ET._ElementTree, search_lemmas, window) -> dict:
+def tree_to_dict_of_nodes(tree: ET._ElementTree, search_lemmas, window, minimal_element) -> dict:
     dictionnary = {}
-    all_clauses = tree.xpath("descendant::tei:cl", namespaces=ns_decl)
+    all_clauses = tree.xpath(f"descendant::tei:{minimal_element}", namespaces=ns_decl)
     for idx, clause in enumerate(all_clauses):
         localisation: str = clause.xpath("ancestor::tei:div/@n", namespaces=ns_decl)[-1]
         ident: str = clause.xpath("@xml:id")[0]
@@ -46,7 +45,7 @@ def tree_to_dict_of_nodes(tree: ET._ElementTree, search_lemmas, window) -> dict:
     return dictionnary
 
 
-def match_all_nodes(source_nodes, target_nodes, query):
+def match_all_nodes(source_nodes, target_nodes, query, out_dir="test_results"):
     print(f"Searching for {query}")
     corresp_sents = {}
     result = []
@@ -65,12 +64,12 @@ def match_all_nodes(source_nodes, target_nodes, query):
                            " | ".join([sent['tokens'] for sent in correponding_sents]),
                            ", ".join(node['corresp'])])
     print(f"{len(result)} results found for query '{query}'.")
-    with open(f"results/{query}.tsv", "w") as result_file:
+    with open(f"{out_dir}/{query}.tsv", "w") as result_file:
         result_file.write("Localisation\tId. source\tSegment source\tSegment cible\tId. cible\n")
         for item in result:
             result_file.write("\t".join(item) + "\n")
 
-    with open(f"results/{query}.tex", "w") as result_file_tex:
+    with open(f"{out_dir}/{query}.tex", "w") as result_file_tex:
         table_string = pd.DataFrame([[ligne[0]] + ligne[2:4] for ligne in result]).to_latex(index=False, header=False)
         table_string = table_string.replace("\\\\", "\\\\\hline")
         table_string = table_string.replace("\\toprule", "")
@@ -79,7 +78,7 @@ def match_all_nodes(source_nodes, target_nodes, query):
         table_string = table_string.replace("\midrule", "\hline")
         result_file_tex.write(table_string)
         
-    tsv2html(f"results/{query}.tsv", f"results/{query}.html")
+    tsv2html(f"{out_dir}/{query}.tsv", f"{out_dir}/{query}.html")
 
 
 def tsv2html(tsv_file_name, html_file_name):
@@ -263,15 +262,19 @@ def txt_to_liste(filename):
     return output_list
 
 
-def main(source, target, query, lang, lemmatize, search_forms, window):
+def main(source, target, query, lang, lemmatize, search_forms, window, out_dir, minimal_element):
+    try:
+        os.mkdir(out_dir)
+    except FileExistsError:
+        pass
     if lemmatize:
         lemmatisation(source, lang)
     source_as_tree = ET.parse(source)
     target_as_tree = ET.parse(target)
     search_lemmas = not search_forms
-    nodes_source = tree_to_dict_of_nodes(source_as_tree, search_lemmas=search_lemmas, window=window)
-    nodes_target = tree_to_dict_of_nodes(target_as_tree, search_lemmas=False, window=window)
-    match_all_nodes(nodes_source, nodes_target, query)
+    nodes_source = tree_to_dict_of_nodes(source_as_tree, search_lemmas=search_lemmas, window=window, minimal_element=minimal_element)
+    nodes_target = tree_to_dict_of_nodes(target_as_tree, search_lemmas=False, window=window, minimal_element=minimal_element)
+    match_all_nodes(nodes_source, nodes_target, query, out_dir)
     # print(nodes_source)
 
 
@@ -286,13 +289,19 @@ if __name__ == '__main__':
     parser.add_argument("-w", "--window", default=1,
                         help="Fenêtre de contexte à droite et à gauche.")
     parser.add_argument("-l", "--lang", default="",
-                        help="Langue du texte source (pour la lemmatisation).")
+                        help="Fenêtre de contexte à droite et à gauche.")
+    parser.add_argument("-o", "--out_dir", default="",
+                        help="Répertoire de sortie des résultats.")
+    parser.add_argument("-me", "--minimal_element", default="cl",
+                        help="Élément servant à l'alignement du corpus.")
     parser.add_argument('--lemmatize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--search_forms', action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
     source = args.source
+    out_dir = args.out_dir
     target = args.target
     query = args.query
+    minimal_element = args.minimal_element
     window = int(args.window)
     lang = args.lang
     lemmatize = args.lemmatize
@@ -303,4 +312,6 @@ if __name__ == '__main__':
          lang=lang,
          lemmatize=lemmatize,
          search_forms=search_forms,
-         window=window)
+         window=window,
+         out_dir=out_dir,
+         minimal_element=minimal_element)
