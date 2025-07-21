@@ -14,52 +14,79 @@ ns_decl = {'tei': tei_namespace}
 
 
 def tree_to_dict_of_nodes(tree: ET._ElementTree, search_lemmas, window, minimal_element) -> dict:
-    dictionnary = {}
+    dictionnary = {'ids': [], 'idents': {}}
     all_clauses = tree.xpath(f"descendant::tei:{minimal_element}", namespaces=ns_decl)
+    if window != 0:
+        delimiter = "|"
+    else:
+        delimiter = ""
     for idx, clause in enumerate(all_clauses):
         localisation: str = clause.xpath("ancestor::tei:div/@n", namespaces=ns_decl)[-1]
         ident: str = clause.xpath("@xml:id")[0]
+        dictionnary["ids"].append(ident)
         corresp: list = clause.xpath("@corresp")[0].replace("#", "").split()
         current_tokens = " ".join(
             clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/descendant::text()", namespaces=ns_decl))
-        if idx == 0:
-            tokens = current_tokens
-        else:
-            previous_tokens = " | ".join([" ".join(all_clauses[index].xpath("descendant::node()[self::tei:pc or self::tei:w]/descendant::text()",
-                                             namespaces=ns_decl)) for index in range(idx - window, idx)])
-            try:
-                next_tokens = " | ".join([" ".join(all_clauses[index].xpath("descendant::node()[self::tei:pc or self::tei:w]/descendant::text()",
-                                             namespaces=ns_decl)) for index in range(idx + 1, idx + window + 1)])
-            except IndexError:
-                next_tokens = ""
-            tokens = previous_tokens + " " + current_tokens + " " + next_tokens
+        tokens = current_tokens
         if search_lemmas:
             searchable_tokens = " ".join(clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/@lemma",
                                              namespaces=ns_decl))
         else:
             searchable_tokens = current_tokens
-        dictionnary[ident] = {"corresp": corresp, "tokens": tokens, "searchable_tokens": searchable_tokens,
+        dictionnary["idents"][ident] = {"corresp": corresp, "tokens": tokens, "searchable_tokens": searchable_tokens,
                               "localisation": localisation}
+                              
     return dictionnary
 
 
-def match_all_nodes(source_nodes, target_nodes, query, out_dir="test_results"):
+def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results"):
     print(f"Searching for {query}")
     corresp_sents = {}
     result = []
-    for idx, (ident, node) in enumerate(source_nodes.items()):
+    for idx, (ident, node) in enumerate(source_nodes["idents"].items()):
         if query in node['searchable_tokens']:
-            correponding_sents = [target_nodes[corr] for corr in node['corresp']]
-            corresp_sents[idx] = (node['corresp'], node['tokens'], correponding_sents)
+            corresponding_sents = [target_nodes["idents"][corr] for corr in node['corresp']]
+            print(node)
+            print(corresponding_sents)
+            print(ident)
+            first_source_node_id = ident
+            index = next(idx for idx, id in enumerate(source_nodes["ids"]) if id == first_source_node_id)
+            previous_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["tokens"] for rolling_idx in range(index - window, index)])
+            next_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["tokens"] for rolling_idx in range(index + 1, index + 1 + window)])
+
+            source_nodes_with_context = previous_source_nodes + " <b> " + node['tokens'] + " </b> " + next_source_nodes
+
+            # On doit gérer différemment la cible, car il y a fusion possible (ce qui n'est pas le cas dans la source
+            # (l'outil ne gère pas le 2 > 1 segments pour l'instant)
+            try:
+                first_target_node_id = node['corresp'][0]
+            except IndexError:
+                result.append([node['localisation'],
+                               ident,
+                               source_nodes_with_context,
+                               "ø",
+                               "ø"])
+                continue
+            last_target_node_id = node['corresp'][-1]
+            first_corresp_index = next(idx for idx, id in enumerate(target_nodes["ids"]) if id == first_target_node_id)
+            last_corresp_index = next(idx for idx, id in enumerate(target_nodes["ids"]) if id == last_target_node_id)
+            previous_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["tokens"] for rolling_idx in range(first_corresp_index - window, first_corresp_index)])
+            next_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["tokens"] for rolling_idx in range(last_corresp_index + 1, last_corresp_index + 1 + window)])
+            corresponding_sents_as_txt = " | ".join([sent['tokens'] for sent in corresponding_sents])
+            corresponding_sents_with_context = previous_target_nodes + " <b> " + corresponding_sents_as_txt + " </b> " + next_target_nodes
+
+
+
+            corresp_sents[idx] = (node['corresp'], node['tokens'], corresponding_sents)
             print("---")
             print(node['localisation'])
-            print(f"Segment: {ident}\n{node['tokens']}")
-            print([sent['tokens'] for sent in correponding_sents])
+            print(f"Segment: {ident}\n{source_nodes_with_context}")
+            print(corresponding_sents_with_context)
             print(f"Corresp segments: {', '.join(node['corresp'])}")
             result.append([node['localisation'],
                            ident,
-                           node['tokens'],
-                           " | ".join([sent['tokens'] for sent in correponding_sents]),
+                           source_nodes_with_context,
+                           corresponding_sents_with_context,
                            ", ".join(node['corresp'])])
     print(f"{len(result)} results found for query '{query}'.")
     with open(f"{out_dir}/{query}.tsv", "w") as result_file:
@@ -74,6 +101,8 @@ def match_all_nodes(source_nodes, target_nodes, query, out_dir="test_results"):
         table_string = table_string.replace("\\bottomrule", "")
         table_string = table_string.replace("lll", "|p{1cm}|p{6.5cm}|p{6.5cm}|")
         table_string = table_string.replace("\midrule", "\hline")
+        table_string = table_string.replace("<b>", "\\textbf{")
+        table_string = table_string.replace("</b>", "}")
         result_file_tex.write(table_string)
         
     tsv2html(f"{out_dir}/{query}.tsv", f"{out_dir}/{query}.html")
@@ -84,7 +113,8 @@ def tsv2html(tsv_file_name, html_file_name):
     old_width = pd.get_option('display.max_colwidth')
     # pd.set_option('display.max_colwidth', -1)
     with open(html_file_name, 'w') as html_file:
-        html_file.write(df.to_html(index=False))
+        written = df.to_html(index=False)
+        html_file.write(written.replace("&lt;", "<").replace("&gt;", ">"))
     pd.set_option('display.max_colwidth', old_width)
 
 
@@ -138,7 +168,7 @@ def normalize_spelling(text_file):
         text = text.replace(orig, reg)
 
     with open(text_file.replace('.txt', '.normalized.txt'), "w") as output_text_file:
-        output_text_file.write(text)
+        output_text_file.write(text.replace(".", ".\n"))
         output_text_file.write("\n")
     print("Done")
 
@@ -180,7 +210,7 @@ def lemmatisation(fichier, langue, out_dir):
 
     if langue == "es":
         normalize_spelling(fichier_sortie_txt)
-        fichier_normalise = f'{out_dir}/{fichier_sans_extension}.normalized.txt'
+        fichier_normalise = f'{out_dir}/{fichier_sans_extension}.tokenized.normalized.txt'
         fichier_lemmatise = f'{out_dir}/{fichier_sans_extension}.lemmatized.txt'
         cmd_sh = ["sh",
                   "scripts/analyze.sh",
@@ -271,7 +301,7 @@ def main(source, target, query, lang, lemmatize, search_forms, window, out_dir, 
     search_lemmas = not search_forms
     nodes_source = tree_to_dict_of_nodes(source_as_tree, search_lemmas=search_lemmas, window=window, minimal_element=minimal_element)
     nodes_target = tree_to_dict_of_nodes(target_as_tree, search_lemmas=False, window=window, minimal_element=minimal_element)
-    match_all_nodes(nodes_source, nodes_target, query, out_dir)
+    match_all_nodes(nodes_source, nodes_target, window=window, query=query, out_dir=out_dir)
     # print(nodes_source)
 
 
