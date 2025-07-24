@@ -35,17 +35,39 @@ def tree_to_dict_of_nodes(tree: ET._ElementTree, search_lemmas, window, minimal_
             searchable_tokens = current_tokens
         dictionnary["idents"][ident] = {"corresp": corresp, "tokens": tokens, "searchable_tokens": searchable_tokens,
                               "localisation": localisation}
-                              
+
+    with open("/home/mgl/Documents/test.json", "w") as output_json:
+        json.dump(dictionnary, output_json)
     return dictionnary
 
 
-def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results"):
-    print(f"Searching for {query}")
+def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter_by_lemma=False, filter_by_form=False, negative_filter=False, filter=""):
+    if filter_by_lemma or filter_by_form:
+        if negative_filter:
+            print(f"Searching for {query} and not {filter}")
+            results_name = f"{query}_!{filter}"
+        else:
+            print(f"Searching for {query} and {filter}")
+            results_name = f"{query}_{filter}"
+    else:
+        print(f"Searching for {query}")
+        results_name = f"{query}"
     corresp_sents = {}
     result = []
     for idx, (ident, node) in enumerate(source_nodes["idents"].items()):
         if query in node['searchable_tokens']:
             corresponding_sents = [target_nodes["idents"][corr] for corr in node['corresp']]
+            if filter_by_form or filter_by_lemma:
+                if negative_filter:
+                    if all([filter not in sent["searchable_tokens"] for sent in corresponding_sents]):
+                        pass
+                    else:
+                        continue
+                else:
+                    if any([filter in sent["searchable_tokens"] for sent in corresponding_sents]):
+                        pass
+                    else:
+                        continue
             print(node)
             print(corresponding_sents)
             print(ident)
@@ -89,12 +111,12 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
                            corresponding_sents_with_context,
                            ", ".join(node['corresp'])])
     print(f"{len(result)} results found for query '{query}'.")
-    with open(f"{out_dir}/{query}.tsv", "w") as result_file:
+    with open(f"{out_dir}/{results_name}.tsv", "w") as result_file:
         result_file.write("Localisation\tId. source\tSegment source\tSegment cible\tId. cible\n")
         for item in result:
             result_file.write("\t".join(item) + "\n")
 
-    with open(f"{out_dir}/{query}.tex", "w") as result_file_tex:
+    with open(f"{out_dir}/{results_name}.tex", "w") as result_file_tex:
         table_string = pd.DataFrame([[ligne[0]] + ligne[2:4] for ligne in result]).to_latex(index=False, header=False)
         table_string = table_string.replace("\\\\", "\\\\\hline")
         table_string = table_string.replace("\\toprule", "")
@@ -105,7 +127,7 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
         table_string = table_string.replace("</b>", "}")
         result_file_tex.write(table_string)
         
-    tsv2html(f"{out_dir}/{query}.tsv", f"{out_dir}/{query}.html")
+    tsv2html(f"{out_dir}/{results_name}.tsv", f"{out_dir}/{results_name}.html")
 
 
 def tsv2html(tsv_file_name, html_file_name):
@@ -289,7 +311,7 @@ def txt_to_liste(filename):
     return output_list
 
 
-def main(source, target, query, lang, lemmatize, search_forms, window, out_dir, minimal_element):
+def main(source, target, query, lang, lemmatize, search_forms, window, out_dir, minimal_element, filter_by_lemma, filter_by_form, negative_filter, filter):
     try:
         os.mkdir(out_dir)
     except FileExistsError:
@@ -299,9 +321,10 @@ def main(source, target, query, lang, lemmatize, search_forms, window, out_dir, 
     source_as_tree = ET.parse(source)
     target_as_tree = ET.parse(target)
     search_lemmas = not search_forms
+    search_lemma_in_target = filter_by_lemma is True
     nodes_source = tree_to_dict_of_nodes(source_as_tree, search_lemmas=search_lemmas, window=window, minimal_element=minimal_element)
-    nodes_target = tree_to_dict_of_nodes(target_as_tree, search_lemmas=False, window=window, minimal_element=minimal_element)
-    match_all_nodes(nodes_source, nodes_target, window=window, query=query, out_dir=out_dir)
+    nodes_target = tree_to_dict_of_nodes(target_as_tree, search_lemmas=search_lemma_in_target, window=window, minimal_element=minimal_element)
+    match_all_nodes(nodes_source, nodes_target, window=window, query=query, out_dir=out_dir, filter_by_lemma=filter_by_lemma, filter_by_form=filter_by_form, negative_filter=negative_filter, filter=filter)
     # print(nodes_source)
 
 
@@ -321,18 +344,31 @@ if __name__ == '__main__':
                         help="Répertoire de sortie des résultats.")
     parser.add_argument("-me", "--minimal_element", default="cl",
                         help="Élément servant à l'alignement du corpus.")
+    parser.add_argument("-f", "--filter", default="",
+                        help="Filtre sur la cible.")
     parser.add_argument('--lemmatize', action=argparse.BooleanOptionalAction)
     parser.add_argument('--search_forms', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--filter_by_lemma', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--filter_by_form', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--negative_filter', action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
     source = args.source
     out_dir = args.out_dir
     target = args.target
     query = args.query
+    filter_by_lemma = args.filter_by_lemma
+    filter_by_form = args.filter_by_form
+    negative_filter = args.negative_filter
+    filter = args.filter
     minimal_element = args.minimal_element
     window = int(args.window)
     lang = args.lang
     lemmatize = args.lemmatize
     search_forms = args.search_forms
+
+    if filter_by_lemma:
+        assert filter_by_form != filter_by_lemma, "Options de filtre incompatibles"
+
     main(source=source,
          target=target,
          query=query,
@@ -341,4 +377,8 @@ if __name__ == '__main__':
          search_forms=search_forms,
          window=window,
          out_dir=out_dir,
-         minimal_element=minimal_element)
+         minimal_element=minimal_element,
+         filter_by_lemma=filter_by_lemma,
+         filter_by_form=filter_by_form,
+         negative_filter=negative_filter,
+         filter=filter)
