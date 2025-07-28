@@ -25,28 +25,89 @@ def tree_to_dict_of_nodes(tree: ET._ElementTree, window, minimal_element, save_a
         ident: str = clause.xpath("@xml:id")[0]
         dictionnary["ids"].append(ident)
         corresp: list = clause.xpath("@corresp")[0].replace("#", "").split()
+        all_tokens = clause.xpath("descendant::node()[self::tei:pc or self::tei:w]", namespaces=ns_decl)
+        lemmas = [token.xpath("@lemma")[0] for token in all_tokens]
+        pos = [token.xpath("@pos")[0] for token in all_tokens]
+        morph = [token.xpath("@morph")[0] if len(token.xpath("@morph")) != 0 else '' for token in all_tokens]
+        text = [token.text for token in all_tokens]
+        annotations = []
+        for form, lemma, pos, morph in list(zip(text, lemmas, pos, morph)):
+            annotations.append({"form": form, "lemma": lemma, "pos": pos, "morph": morph})
         current_tokens = " ".join(
             clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/descendant::text()", namespaces=ns_decl))
-        tokens = current_tokens
-        lemmas = " ".join(clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/@lemma",
-                                             namespaces=ns_decl))
-        pos = " ".join(clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/@pos",
-                                             namespaces=ns_decl))
-        if len(clause.xpath("descendant::tei:w/@morph", namespaces=ns_decl)) != 0:
-            morph = " ".join(clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/@morph",
-                                             namespaces=ns_decl))
-        else:
-            morph = None
-        dictionnary["idents"][ident] = {"corresp": corresp, "forms": tokens, "lemmas": lemmas, "pos": pos, "morph": morph,
+        dictionnary["idents"][ident] = {"corresp": corresp, "sent": current_tokens, "annotations": annotations,
                               "localisation": localisation}
 
     with open(save_as, "w") as output_json:
         json.dump(dictionnary, output_json)
     return dictionnary
 
+def process_query(query="[pos='AQ.*'][pos='NC.*']"):
+    """
+    Implémentation d'un parseur CQL. Pour l'instant, ne gère que des requêtes simples (pas de répétition, *+{})
+    """
+    all_tokens = re.compile(r"\[([^\]\[]+)\]")
+    tokenized = [item for item in re.split(all_tokens, query) if item != ""]
+    queries = []
+    regex_query = re.compile(r"=")
+    for item in tokenized:
+        field, value = re.split(regex_query, item)
+        value = re.compile(value.replace("'", ""))
+        queries.append((field, value))
 
-def match_all_nodes(source_nodes, target_nodes, query, search_by, window, out_dir="test_results", filter_by_lemma=False, filter_by_form=False, negative_filter=False, filter="", reduce=1):
-    assert search_by in ["forms", "lemmas", "pos", "morph"], f"Search by should be one of: (forms, lemmas, pos, morph). Is: {search_by}"
+    return queries
+
+def check_if_match(annotation, query):
+    # print(f"Checking {annotation} against {query}")
+    result = re.match(query, annotation)
+    if result:
+        return True
+    else:
+        return False
+
+def check_if_path_matches(segment, queries, matches, matches_number, match_first=False):
+    """
+    Cette fonction permet de vérifier si une requête est vérifiée dans un texte. Fonction récursive.
+    :param segment: le segment sous la forme d'une liste de dictionnaire avec les analyses
+    :param queries: la requête sous la forme d'une liste [('pos': re.compile('AQ.*')), (etc)]
+    :param matches: le nombre de résultats positifs
+    :param matches_number: le nombre de résultats positifs recherchés
+    """
+    # print(f"Segment: {segment}")
+    # print(f"Query: {queries}")
+    # On itère sur les différentes requêtes (chacune des unités de la requête)
+    if match_first:
+        updated_segment = segment[0:1]
+    else:
+        updated_segment = segment
+    for idx_queries, query in enumerate(queries):
+        # print(f"Query: {query}")
+        field, regexp = query
+        # On itère sur chacun des tokens du segment
+        for idx_token, token in enumerate(updated_segment):
+            # Si le token matche avec la requête, on relance la fonction avec la requête suivante et le token suivant
+            if check_if_match(token[field], regexp):
+                # print("It's a match")
+                matches += 1
+                # On vérifie qu'on n'est pas en fin de segment ou en fin de requête
+                if idx_token + 1 != len(segment) and idx_queries + 1 != len(queries):
+                    # print(queries[idx_queries + 1])
+                    # On relance la fonction avec les listes tronquées à la position actuelle, la quantité de matchs et
+                    # la taille de la requête
+                    if check_if_path_matches(segment[idx_token + 1:], queries[idx_queries + 1:], matches, matches_number, match_first=True):
+                        matches += 1
+                        if matches == matches_number:
+                            return True
+                else:
+                    # Si on est en fin de segment ou de requête et qu'on a matché le nombre de requêtes, c'est un match
+                    if matches == matches_number:
+                        return True
+                    else:
+                        return False
+        return False
+
+
+def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter_by_lemma=False, filter_by_form=False, negative_filter=False, filter="", reduce=1):
     if filter_by_lemma or filter_by_form:
         if negative_filter:
             print(f"Searching for {query} and not {filter}")
@@ -59,29 +120,17 @@ def match_all_nodes(source_nodes, target_nodes, query, search_by, window, out_di
         results_name = f"{query}"
     corresp_sents = {}
     result = []
+    processed_query = process_query(query)
     for idx, (ident, node) in enumerate(source_nodes["idents"].items()):
-        if node[search_by] and query in node[search_by]:
+        if check_if_path_matches(node['annotations'], processed_query, matches=0, matches_number=len(processed_query)):
             corresponding_sents = [target_nodes["idents"][corr] for corr in node['corresp']]
-            if filter_by_form or filter_by_lemma:
-                if negative_filter:
-                    if all([filter not in sent[search_by] for sent in corresponding_sents]):
-                        pass
-                    else:
-                        continue
-                else:
-                    if any([filter in sent[search_by] for sent in corresponding_sents]):
-                        pass
-                    else:
-                        continue
-            print(node)
-            print(corresponding_sents)
-            print(ident)
+            # Adapter la fonction de filtre
             first_source_node_id = ident
             index = next(idx for idx, id in enumerate(source_nodes["ids"]) if id == first_source_node_id)
-            previous_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["forms"] for rolling_idx in range(index - window, index)])
-            next_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["forms"] for rolling_idx in range(index + 1, index + 1 + window)])
+            previous_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["sent"] for rolling_idx in range(index - window, index)])
+            next_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["sent"] for rolling_idx in range(index + 1, index + 1 + window)])
 
-            source_nodes_with_context = previous_source_nodes + " <b> " + node['forms'] + " </b> " + next_source_nodes
+            source_nodes_with_context = previous_source_nodes + " <b> " + node['sent'] + " </b> " + next_source_nodes
 
             # On doit gérer différemment la cible, car il y a fusion possible (ce qui n'est pas le cas dans la source
             # (l'outil ne gère pas le 2 > 1 segments pour l'instant)
@@ -97,14 +146,14 @@ def match_all_nodes(source_nodes, target_nodes, query, search_by, window, out_di
             last_target_node_id = node['corresp'][-1]
             first_corresp_index = next(idx for idx, id in enumerate(target_nodes["ids"]) if id == first_target_node_id)
             last_corresp_index = next(idx for idx, id in enumerate(target_nodes["ids"]) if id == last_target_node_id)
-            previous_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["forms"] for rolling_idx in range(first_corresp_index - window, first_corresp_index)])
-            next_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["forms"] for rolling_idx in range(last_corresp_index + 1, last_corresp_index + 1 + window)])
-            corresponding_sents_as_txt = " | ".join([sent['forms'] for sent in corresponding_sents])
+            previous_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["sent"] for rolling_idx in range(first_corresp_index - window, first_corresp_index)])
+            next_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["sent"] for rolling_idx in range(last_corresp_index + 1, last_corresp_index + 1 + window)])
+            corresponding_sents_as_txt = " | ".join([sent["sent"] for sent in corresponding_sents])
             corresponding_sents_with_context = previous_target_nodes + " <b> " + corresponding_sents_as_txt + " </b> " + next_target_nodes
 
 
 
-            corresp_sents[idx] = (node['corresp'], node['forms'], corresponding_sents)
+            corresp_sents[idx] = (node['corresp'], node["sent"], corresponding_sents)
             print("---")
             print(node['localisation'])
             print(f"Segment: {ident}\n{source_nodes_with_context}")
@@ -325,10 +374,6 @@ def main(source,
          query,
          lang,
          lemmatize,
-         search_forms,
-         search_lemmas,
-         search_pos,
-         search_morph,
          window,
          out_dir,
          minimal_element,
@@ -337,7 +382,6 @@ def main(source,
          negative_filter,
          filter,
          reduce):
-    assert len([item for item in [search_forms, search_lemmas, search_pos, search_morph] if item is True]) <= 1, "Search option issue"
     try:
         os.mkdir(out_dir)
     except FileExistsError:
@@ -347,22 +391,19 @@ def main(source,
     source_as_tree = ET.parse(source)
     target_as_tree = ET.parse(target)
     search_lemma_in_target = filter_by_lemma is True
-    nodes_source = tree_to_dict_of_nodes(source_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/source.json")
-    nodes_target = tree_to_dict_of_nodes(target_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/target.json")
-    if search_lemmas:
-        search_by = "lemmas"
-    elif search_forms:
-        search_by = "forms"
-    elif search_pos:
-        search_by = "pos"
-    else:
-        search_by = "morph"
+    # nodes_source = tree_to_dict_of_nodes(source_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/source.json")
+    # nodes_target = tree_to_dict_of_nodes(target_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/target.json")
+
+    with open("/home/mgl/Documents/source.json", "r") as input_source:
+        nodes_source = json.load(input_source)
+    with open("/home/mgl/Documents/target.json", "r") as input_target:
+        nodes_target = json.load(input_target)
+
 
     match_all_nodes(nodes_source,
                     nodes_target,
                     window=window,
                     query=query,
-                    search_by=search_by,
                     out_dir=out_dir,
                     filter_by_lemma=filter_by_lemma,
                     filter_by_form=filter_by_form,
@@ -393,10 +434,6 @@ if __name__ == '__main__':
     parser.add_argument("-r", "--reduce", default="1",
                         help="Ne retenir que la proportion proposée d'exemples.")
     parser.add_argument('--lemmatize', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--search_lemmas', action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument('--search_forms', action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument('--search_morph', action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument('--search_pos', action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('--filter_by_lemma', action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('--filter_by_form', action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('--negative_filter', action=argparse.BooleanOptionalAction, default=False)
@@ -414,10 +451,6 @@ if __name__ == '__main__':
     lang = args.lang
     reduce = float(args.reduce)
     lemmatize = args.lemmatize
-    search_lemmas = args.search_lemmas
-    search_forms = args.search_forms
-    search_morph = args.search_morph
-    search_pos = args.search_pos
 
     if filter_by_lemma:
         assert filter_by_form != filter_by_lemma, "Options de filtre incompatibles"
@@ -427,10 +460,6 @@ if __name__ == '__main__':
          query=query,
          lang=lang,
          lemmatize=lemmatize,
-         search_forms=search_forms,
-         search_lemmas=search_lemmas,
-         search_pos=search_pos,
-         search_morph=search_morph,
          window=window,
          out_dir=out_dir,
          minimal_element=minimal_element,
