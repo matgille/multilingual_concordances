@@ -17,9 +17,10 @@ de `1 > n`, `n > 1` et `n > n` segments est possible.
 
 Peuvent être interrogés les formes ou les lemmes: 
 
-`python3 get_translations.py -s test_data/Val_S.xml -t test_data/Rome_W.xml -q "politia" -w 1 -o test_results -me cl`
+`python3 get_translations.py -s test_data/Val_S.xml  -t  test_data/Rome_W.xml -o new_alignement_2/ -me cl -q "[pos='AQ.*'][pos='NC.*']" -w 1`
 
-Cette commande produit une table de concordance en prenant le texte `Val_S.xml` comme source, avec un contexte de 1 segment à gauche et à droite pour la source et la cible, sur la requête `politia`
+Cette commande produit une table de concordance en prenant le texte `Val_S.xml` comme source, avec un contexte de 1 segment à gauche et à droite pour la source et la cible. Elle cherche tous les
+adjectifs antéposés au substantif (requêtes sur les étiquettes EAGLES)
 
 
 ## Sortie
