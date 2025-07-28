@@ -1,5 +1,5 @@
 import json
-
+import random
 import lxml.etree as ET
 import subprocess
 import re
@@ -13,7 +13,7 @@ tei_namespace = 'http://www.tei-c.org/ns/1.0'
 ns_decl = {'tei': tei_namespace}
 
 
-def tree_to_dict_of_nodes(tree: ET._ElementTree, search_lemmas, window, minimal_element) -> dict:
+def tree_to_dict_of_nodes(tree: ET._ElementTree, window, minimal_element, save_as) -> dict:
     dictionnary = {'ids': [], 'idents': {}}
     all_clauses = tree.xpath(f"descendant::tei:{minimal_element}", namespaces=ns_decl)
     if window != 0:
@@ -28,20 +28,25 @@ def tree_to_dict_of_nodes(tree: ET._ElementTree, search_lemmas, window, minimal_
         current_tokens = " ".join(
             clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/descendant::text()", namespaces=ns_decl))
         tokens = current_tokens
-        if search_lemmas:
-            searchable_tokens = " ".join(clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/@lemma",
+        lemmas = " ".join(clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/@lemma",
+                                             namespaces=ns_decl))
+        pos = " ".join(clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/@pos",
+                                             namespaces=ns_decl))
+        if len(clause.xpath("descendant::tei:w/@morph", namespaces=ns_decl)) != 0:
+            morph = " ".join(clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/@morph",
                                              namespaces=ns_decl))
         else:
-            searchable_tokens = current_tokens
-        dictionnary["idents"][ident] = {"corresp": corresp, "tokens": tokens, "searchable_tokens": searchable_tokens,
+            morph = None
+        dictionnary["idents"][ident] = {"corresp": corresp, "forms": tokens, "lemmas": lemmas, "pos": pos, "morph": morph,
                               "localisation": localisation}
 
-    with open("/home/mgl/Documents/test.json", "w") as output_json:
+    with open(save_as, "w") as output_json:
         json.dump(dictionnary, output_json)
     return dictionnary
 
 
-def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter_by_lemma=False, filter_by_form=False, negative_filter=False, filter=""):
+def match_all_nodes(source_nodes, target_nodes, query, search_by, window, out_dir="test_results", filter_by_lemma=False, filter_by_form=False, negative_filter=False, filter="", reduce=1):
+    assert search_by in ["forms", "lemmas", "pos", "morph"], f"Search by should be one of: (forms, lemmas, pos, morph). Is: {search_by}"
     if filter_by_lemma or filter_by_form:
         if negative_filter:
             print(f"Searching for {query} and not {filter}")
@@ -55,16 +60,16 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
     corresp_sents = {}
     result = []
     for idx, (ident, node) in enumerate(source_nodes["idents"].items()):
-        if query in node['searchable_tokens']:
+        if node[search_by] and query in node[search_by]:
             corresponding_sents = [target_nodes["idents"][corr] for corr in node['corresp']]
             if filter_by_form or filter_by_lemma:
                 if negative_filter:
-                    if all([filter not in sent["searchable_tokens"] for sent in corresponding_sents]):
+                    if all([filter not in sent[search_by] for sent in corresponding_sents]):
                         pass
                     else:
                         continue
                 else:
-                    if any([filter in sent["searchable_tokens"] for sent in corresponding_sents]):
+                    if any([filter in sent[search_by] for sent in corresponding_sents]):
                         pass
                     else:
                         continue
@@ -73,10 +78,10 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
             print(ident)
             first_source_node_id = ident
             index = next(idx for idx, id in enumerate(source_nodes["ids"]) if id == first_source_node_id)
-            previous_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["tokens"] for rolling_idx in range(index - window, index)])
-            next_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["tokens"] for rolling_idx in range(index + 1, index + 1 + window)])
+            previous_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["forms"] for rolling_idx in range(index - window, index)])
+            next_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["forms"] for rolling_idx in range(index + 1, index + 1 + window)])
 
-            source_nodes_with_context = previous_source_nodes + " <b> " + node['tokens'] + " </b> " + next_source_nodes
+            source_nodes_with_context = previous_source_nodes + " <b> " + node['forms'] + " </b> " + next_source_nodes
 
             # On doit gérer différemment la cible, car il y a fusion possible (ce qui n'est pas le cas dans la source
             # (l'outil ne gère pas le 2 > 1 segments pour l'instant)
@@ -92,14 +97,14 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
             last_target_node_id = node['corresp'][-1]
             first_corresp_index = next(idx for idx, id in enumerate(target_nodes["ids"]) if id == first_target_node_id)
             last_corresp_index = next(idx for idx, id in enumerate(target_nodes["ids"]) if id == last_target_node_id)
-            previous_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["tokens"] for rolling_idx in range(first_corresp_index - window, first_corresp_index)])
-            next_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["tokens"] for rolling_idx in range(last_corresp_index + 1, last_corresp_index + 1 + window)])
-            corresponding_sents_as_txt = " | ".join([sent['tokens'] for sent in corresponding_sents])
+            previous_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["forms"] for rolling_idx in range(first_corresp_index - window, first_corresp_index)])
+            next_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["forms"] for rolling_idx in range(last_corresp_index + 1, last_corresp_index + 1 + window)])
+            corresponding_sents_as_txt = " | ".join([sent['forms'] for sent in corresponding_sents])
             corresponding_sents_with_context = previous_target_nodes + " <b> " + corresponding_sents_as_txt + " </b> " + next_target_nodes
 
 
 
-            corresp_sents[idx] = (node['corresp'], node['tokens'], corresponding_sents)
+            corresp_sents[idx] = (node['corresp'], node['forms'], corresponding_sents)
             print("---")
             print(node['localisation'])
             print(f"Segment: {ident}\n{source_nodes_with_context}")
@@ -111,6 +116,10 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
                            corresponding_sents_with_context,
                            ", ".join(node['corresp'])])
     print(f"{len(result)} results found for query '{query}'.")
+    steps = int(1 / reduce)
+    result = result[::steps]
+    print(len(result))
+
     with open(f"{out_dir}/{results_name}.tsv", "w") as result_file:
         result_file.write("Localisation\tId. source\tSegment source\tSegment cible\tId. cible\n")
         for item in result:
@@ -311,7 +320,24 @@ def txt_to_liste(filename):
     return output_list
 
 
-def main(source, target, query, lang, lemmatize, search_forms, window, out_dir, minimal_element, filter_by_lemma, filter_by_form, negative_filter, filter):
+def main(source,
+         target,
+         query,
+         lang,
+         lemmatize,
+         search_forms,
+         search_lemmas,
+         search_pos,
+         search_morph,
+         window,
+         out_dir,
+         minimal_element,
+         filter_by_lemma,
+         filter_by_form,
+         negative_filter,
+         filter,
+         reduce):
+    assert len([item for item in [search_forms, search_lemmas, search_pos, search_morph] if item is True]) <= 1, "Search option issue"
     try:
         os.mkdir(out_dir)
     except FileExistsError:
@@ -320,11 +346,29 @@ def main(source, target, query, lang, lemmatize, search_forms, window, out_dir, 
         lemmatisation(source, lang, out_dir)
     source_as_tree = ET.parse(source)
     target_as_tree = ET.parse(target)
-    search_lemmas = not search_forms
     search_lemma_in_target = filter_by_lemma is True
-    nodes_source = tree_to_dict_of_nodes(source_as_tree, search_lemmas=search_lemmas, window=window, minimal_element=minimal_element)
-    nodes_target = tree_to_dict_of_nodes(target_as_tree, search_lemmas=search_lemma_in_target, window=window, minimal_element=minimal_element)
-    match_all_nodes(nodes_source, nodes_target, window=window, query=query, out_dir=out_dir, filter_by_lemma=filter_by_lemma, filter_by_form=filter_by_form, negative_filter=negative_filter, filter=filter)
+    nodes_source = tree_to_dict_of_nodes(source_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/source.json")
+    nodes_target = tree_to_dict_of_nodes(target_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/target.json")
+    if search_lemmas:
+        search_by = "lemmas"
+    elif search_forms:
+        search_by = "forms"
+    elif search_pos:
+        search_by = "pos"
+    else:
+        search_by = "morph"
+
+    match_all_nodes(nodes_source,
+                    nodes_target,
+                    window=window,
+                    query=query,
+                    search_by=search_by,
+                    out_dir=out_dir,
+                    filter_by_lemma=filter_by_lemma,
+                    filter_by_form=filter_by_form,
+                    negative_filter=negative_filter,
+                    filter=filter,
+                    reduce=reduce)
     # print(nodes_source)
 
 
@@ -346,8 +390,13 @@ if __name__ == '__main__':
                         help="Élément servant à l'alignement du corpus.")
     parser.add_argument("-f", "--filter", default="",
                         help="Filtre sur la cible.")
+    parser.add_argument("-r", "--reduce", default="1",
+                        help="Ne retenir que la proportion proposée d'exemples.")
     parser.add_argument('--lemmatize', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--search_forms', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--search_lemmas', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--search_forms', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--search_morph', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--search_pos', action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('--filter_by_lemma', action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('--filter_by_form', action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument('--negative_filter', action=argparse.BooleanOptionalAction, default=False)
@@ -363,8 +412,12 @@ if __name__ == '__main__':
     minimal_element = args.minimal_element
     window = int(args.window)
     lang = args.lang
+    reduce = float(args.reduce)
     lemmatize = args.lemmatize
+    search_lemmas = args.search_lemmas
     search_forms = args.search_forms
+    search_morph = args.search_morph
+    search_pos = args.search_pos
 
     if filter_by_lemma:
         assert filter_by_form != filter_by_lemma, "Options de filtre incompatibles"
@@ -375,10 +428,14 @@ if __name__ == '__main__':
          lang=lang,
          lemmatize=lemmatize,
          search_forms=search_forms,
+         search_lemmas=search_lemmas,
+         search_pos=search_pos,
+         search_morph=search_morph,
          window=window,
          out_dir=out_dir,
          minimal_element=minimal_element,
          filter_by_lemma=filter_by_lemma,
          filter_by_form=filter_by_form,
          negative_filter=negative_filter,
-         filter=filter)
+         filter=filter,
+         reduce=reduce)
