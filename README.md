@@ -15,12 +15,12 @@ de `1 > n`, `n > 1` et `n > n` segments est possible.
 
 ## Fonctionnement
 
-Peuvent être interrogés les formes ou les lemmes: 
+Peuvent être interrogés les informations formelles (formes), lexicales (lemmes) ou grammaticales (pos, morph), selon une syntaxe CQL basique:
 
 `python3 get_translations.py -s test_data/Val_S.xml  -t  test_data/Rome_W.xml -o new_alignement_2/ -me cl -q "[pos='AQ.*'][pos='NC.*']" -w 1`
 
 Cette commande produit une table de concordance en prenant le texte `Val_S.xml` comme source, avec un contexte de 1 segment à gauche et à droite pour la source et la cible. Elle cherche tous les
-adjectifs antéposés au substantif (requêtes sur les étiquettes EAGLES)
+adjectifs antéposés au substantif (requêtes sur les étiquettes EAGLES).
 
 
 ## Sortie
@@ -52,13 +52,14 @@ The tool can manage alignments of `1 > n`, `n > 1` and `n > n` segments.
 ## How it works
 
 
-Forms and lemmas can be queried: 
+Forms, lemmas, pos and morph can be queried with a basic CQL parser: 
 
 
-`python3 get_translations.py -s test_data/Val_S.xml -t test_data/Rome_W.xml -q "politia" -w 1 -o test_results -me cl`
+`python3 get_translations.py -s test_data/Val_S.xml  -t  test_data/Rome_W.xml -o new_alignement_2/ -me cl -q "[pos='AQ.*'][pos='NC.*']" -w 1`
 
 
-This command produces a concordance table taking the text `Val_S.xml` as source, with a context of 1 segment left and right for source and target, on the lemma `politia`.
+This command produces a concordance table taking the text `Val_S.xml` as source, with a context of 1 segment left and right for source and target, and extracts all the segments
+with an anteposed adjective.
 
 
 
