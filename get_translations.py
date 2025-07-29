@@ -66,83 +66,23 @@ def check_if_match(annotation, query):
         return False
 
 
-def check_if_its_a_match(segment, queries):
-    # On vérifie d'abord que le premier matche
-    print("---")
-    print(segment)
-    first_field, first_regexp = queries[0]
-    first_query_matches = [check_if_match(token[first_field], first_regexp) for token in segment[:-len(queries)]]
-    if any(first_query_matches):
-        print(first_query_matches.index(True))
-        print(first_query_matches)
-        exit(0)
-
-def check_if_path_matches(sentence, segment, queries, matches, matches_number, match_first=False, debug=False):
-    """
-    Cette fonction permet de vérifier si une requête est vérifiée dans un texte. Fonction récursive.
-    :param segment: le segment sous la forme d'une liste de dictionnaire avec les analyses
-    :param queries: la requête sous la forme d'une liste [('pos': re.compile('AQ.*')), (etc)]
-    :param matches: le nombre de résultats positifs
-    :param matches_number: le nombre de résultats positifs recherchés
-    """
-    # print(f"Segment: {segment}")
-    # print(f"Query: {queries}")
-    # On itère sur les différentes requêtes (chacune des unités de la requête)
-    if "allegar los castiellos" in sentence:
-        debug = True
-    else:
-        return
-        debug = False
-    if match_first:
-        updated_segment = segment[0:1]
-    else:
-        updated_segment = segment
-
-    if match_first:
-        updated_queries = queries[0:1]
-    else:
-        updated_queries = queries
-    for idx_queries, query in enumerate(updated_queries):
-        # print(f"Query: {query}")
-        field, regexp = query
-        # On itère sur chacun des tokens du segment
-        for idx_token, token in enumerate(updated_segment):
-            # Si le token matche avec la requête, on relance la fonction avec la requête suivante et le token suivant
-            if check_if_match(token[field], regexp):
-                matches += 1
-                # On vérifie qu'on n'est pas en fin de segment ou en fin de requête
-                if idx_token + 1 != len(updated_segment) and idx_queries + 1 != len(updated_queries):
-                    # print(queries[idx_queries + 1])
-                    # On relance la fonction avec les listes tronquées à la position actuelle, la quantité de matchs et
-                    # la taille de la requête
-                    if check_if_path_matches(sentence, segment[idx_token + 1:], queries[idx_queries + 1:], matches, matches_number, match_first=True):
-                        matches += 1
-                        if matches == matches_number:
-                            # print(f"It's a match: {token} against {regexp}")
-                            print("True 1")
-                            return True
-                    else:
-                        if debug:
-                            print("Exit 0")
-                        return False
-                else:
-                    # Si on est en fin de segment ou de requête et qu'on a matché le nombre de requêtes, c'est un match
-                    if matches == matches_number:
-                        print("True 2")
-                        return True
-                    else:
-                        if check_if_path_matches(sentence, segment[idx_token + 1:], queries[idx_queries + 1:], matches,
-                                                 matches_number, match_first=True):
-                            matches += 1
-                            if matches == matches_number:
-                                print("True 3")
-                                return True
-        if debug:
-            print("Exit 3")
-        return False
+def filter_sent(segments, filter):
+    field, regexp = filter.replace("[", "").replace("]", "").split("=")
+    print(regexp)
+    print(field)
+    regexp = re.compile(fr"^{regexp}$")
+    for segment in segments:
+        annotations = segment['annotations']
+        print(annotations)
+        if any([re.match(filter, token[field]) for token in annotations]):
+            print("It's a match !")
+            print([re.match(filter, token[field]) for token in annotations])
+            return True
+    return False
 
 
 def iter_over_sentence(sentence, pattern):
+    pattern = process_query(pattern)
     if sentence == []:
         return
     match = False
@@ -162,26 +102,21 @@ def iter_over_sentence(sentence, pattern):
             pattern_index_match = 0
             index += 1
 
-def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter_by_lemma=False, filter_by_form=False, negative_filter=False, filter="", reduce=1):
-    if filter_by_lemma or filter_by_form:
-        if negative_filter:
-            print(f"Searching for {query} and not {filter}")
-            results_name = f"{query}_!{filter}"
-        else:
-            print(f"Searching for {query} and {filter}")
-            results_name = f"{query}_{filter}"
-    else:
-        print(f"Searching for {query}")
-        results_name = f"{query}"
+def contains(annotation, query):
+    print()
+
+def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter="", reduce=1):
+    results_name = f"{query}"
     corresp_sents = {}
     result = []
-    processed_query = process_query(query)
     for idx, (ident, node) in enumerate(source_nodes["idents"].items()):
-        # if check_if_its_a_match(node['annotations'], processed_query):
-        if iter_over_sentence(node['annotations'], processed_query):
-        # if check_if_path_matches(node['sent'], node['annotations'], processed_query, matches=0, matches_number=len(processed_query), match_first=False):
+        if iter_over_sentence(node['annotations'], query):
+            # if check_if_path_matches(node['sent'], node['annotations'], processed_query, matches=0, matches_number=len(processed_query), match_first=False):
             corresponding_sents = [target_nodes["idents"][corr] for corr in node['corresp']]
             # Adapter la fonction de filtre
+            all_corresp_annotations = [annotation for corr in node['corresp'] for annotation in target_nodes["idents"][corr]['annotations']]
+            if not iter_over_sentence(all_corresp_annotations, filter):
+                continue
             first_source_node_id = ident
             index = next(idx for idx, id in enumerate(source_nodes["ids"]) if id == first_source_node_id)
             previous_source_nodes = " ".join([source_nodes["idents"][source_nodes["ids"][rolling_idx]]["sent"] for rolling_idx in range(index - window, index)])
@@ -434,9 +369,6 @@ def main(source,
          window,
          out_dir,
          minimal_element,
-         filter_by_lemma,
-         filter_by_form,
-         negative_filter,
          filter,
          reduce):
     try:
@@ -447,7 +379,6 @@ def main(source,
         lemmatisation(source, lang, out_dir)
     source_as_tree = ET.parse(source)
     target_as_tree = ET.parse(target)
-    search_lemma_in_target = filter_by_lemma is True
     # nodes_source = tree_to_dict_of_nodes(source_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/source.json")
     # nodes_target = tree_to_dict_of_nodes(target_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/target.json")
 
@@ -462,9 +393,6 @@ def main(source,
                     window=window,
                     query=query,
                     out_dir=out_dir,
-                    filter_by_lemma=filter_by_lemma,
-                    filter_by_form=filter_by_form,
-                    negative_filter=negative_filter,
                     filter=filter,
                     reduce=reduce)
     # print(nodes_source)
@@ -491,26 +419,17 @@ if __name__ == '__main__':
     parser.add_argument("-r", "--reduce", default="1",
                         help="Ne retenir que la proportion proposée d'exemples.")
     parser.add_argument('--lemmatize', action=argparse.BooleanOptionalAction)
-    parser.add_argument('--filter_by_lemma', action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument('--filter_by_form', action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument('--negative_filter', action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
     source = args.source
     out_dir = args.out_dir
     target = args.target
     query = args.query
-    filter_by_lemma = args.filter_by_lemma
-    filter_by_form = args.filter_by_form
-    negative_filter = args.negative_filter
     filter = args.filter
     minimal_element = args.minimal_element
     window = int(args.window)
     lang = args.lang
     reduce = float(args.reduce)
     lemmatize = args.lemmatize
-
-    if filter_by_lemma:
-        assert filter_by_form != filter_by_lemma, "Options de filtre incompatibles"
 
     main(source=source,
          target=target,
@@ -520,8 +439,5 @@ if __name__ == '__main__':
          window=window,
          out_dir=out_dir,
          minimal_element=minimal_element,
-         filter_by_lemma=filter_by_lemma,
-         filter_by_form=filter_by_form,
-         negative_filter=negative_filter,
          filter=filter,
          reduce=reduce)
