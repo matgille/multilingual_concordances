@@ -51,21 +51,33 @@ def process_query(query="[pos='AQ.*'][pos='NC.*']"):
     queries = []
     regex_query = re.compile(r"=")
     for item in tokenized:
-        field, value = re.split(regex_query, item)
-        value = re.compile(value.replace("'", ""))
-        queries.append((field, value))
+        field, expression = re.split(regex_query, item)
+        expression = f"^{expression}$"
+        expression = re.compile(expression.replace("'", ""))
+        queries.append((field, expression))
 
     return queries
 
 def check_if_match(annotation, query):
-    # print(f"Checking {annotation} against {query}")
     result = re.match(query, annotation)
     if result:
         return True
     else:
         return False
 
-def check_if_path_matches(segment, queries, matches, matches_number, match_first=False):
+
+def check_if_its_a_match(segment, queries):
+    # On vérifie d'abord que le premier matche
+    print("---")
+    print(segment)
+    first_field, first_regexp = queries[0]
+    first_query_matches = [check_if_match(token[first_field], first_regexp) for token in segment[:-len(queries)]]
+    if any(first_query_matches):
+        print(first_query_matches.index(True))
+        print(first_query_matches)
+        exit(0)
+
+def check_if_path_matches(sentence, segment, queries, matches, matches_number, match_first=False, debug=False):
     """
     Cette fonction permet de vérifier si une requête est vérifiée dans un texte. Fonction récursive.
     :param segment: le segment sous la forme d'une liste de dictionnaire avec les analyses
@@ -76,36 +88,79 @@ def check_if_path_matches(segment, queries, matches, matches_number, match_first
     # print(f"Segment: {segment}")
     # print(f"Query: {queries}")
     # On itère sur les différentes requêtes (chacune des unités de la requête)
+    if "allegar los castiellos" in sentence:
+        debug = True
+    else:
+        return
+        debug = False
     if match_first:
         updated_segment = segment[0:1]
     else:
         updated_segment = segment
-    for idx_queries, query in enumerate(queries):
+
+    if match_first:
+        updated_queries = queries[0:1]
+    else:
+        updated_queries = queries
+    for idx_queries, query in enumerate(updated_queries):
         # print(f"Query: {query}")
         field, regexp = query
         # On itère sur chacun des tokens du segment
         for idx_token, token in enumerate(updated_segment):
             # Si le token matche avec la requête, on relance la fonction avec la requête suivante et le token suivant
             if check_if_match(token[field], regexp):
-                # print("It's a match")
                 matches += 1
                 # On vérifie qu'on n'est pas en fin de segment ou en fin de requête
-                if idx_token + 1 != len(segment) and idx_queries + 1 != len(queries):
+                if idx_token + 1 != len(updated_segment) and idx_queries + 1 != len(updated_queries):
                     # print(queries[idx_queries + 1])
                     # On relance la fonction avec les listes tronquées à la position actuelle, la quantité de matchs et
                     # la taille de la requête
-                    if check_if_path_matches(segment[idx_token + 1:], queries[idx_queries + 1:], matches, matches_number, match_first=True):
+                    if check_if_path_matches(sentence, segment[idx_token + 1:], queries[idx_queries + 1:], matches, matches_number, match_first=True):
                         matches += 1
                         if matches == matches_number:
+                            # print(f"It's a match: {token} against {regexp}")
+                            print("True 1")
                             return True
+                    else:
+                        if debug:
+                            print("Exit 0")
+                        return False
                 else:
                     # Si on est en fin de segment ou de requête et qu'on a matché le nombre de requêtes, c'est un match
                     if matches == matches_number:
+                        print("True 2")
                         return True
                     else:
-                        return False
+                        if check_if_path_matches(sentence, segment[idx_token + 1:], queries[idx_queries + 1:], matches,
+                                                 matches_number, match_first=True):
+                            matches += 1
+                            if matches == matches_number:
+                                print("True 3")
+                                return True
+        if debug:
+            print("Exit 3")
         return False
 
+
+def iter_over_sentence(sentence, pattern):
+    if sentence == []:
+        return
+    match = False
+    index = 0
+    pattern_index_match = 0
+    while not match:
+        if pattern_index_match == len(pattern):
+            return True
+        elif index + 1 == len(sentence):
+            return
+        current_state = sentence[index]
+        field, query = pattern[pattern_index_match]
+        if check_if_match(current_state[field], query):
+            pattern_index_match += 1
+            index += 1
+        else:
+            pattern_index_match = 0
+            index += 1
 
 def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter_by_lemma=False, filter_by_form=False, negative_filter=False, filter="", reduce=1):
     if filter_by_lemma or filter_by_form:
@@ -122,7 +177,9 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
     result = []
     processed_query = process_query(query)
     for idx, (ident, node) in enumerate(source_nodes["idents"].items()):
-        if check_if_path_matches(node['annotations'], processed_query, matches=0, matches_number=len(processed_query)):
+        # if check_if_its_a_match(node['annotations'], processed_query):
+        if iter_over_sentence(node['annotations'], processed_query):
+        # if check_if_path_matches(node['sent'], node['annotations'], processed_query, matches=0, matches_number=len(processed_query), match_first=False):
             corresponding_sents = [target_nodes["idents"][corr] for corr in node['corresp']]
             # Adapter la fonction de filtre
             first_source_node_id = ident
