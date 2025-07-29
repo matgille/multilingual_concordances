@@ -49,16 +49,21 @@ def process_query(query="[pos='AQ.*'][pos='NC.*']"):
     all_tokens = re.compile(r"\[([^\]\[]+)\]")
     tokenized = [item for item in re.split(all_tokens, query) if item != ""]
     queries = []
-    regex_query = re.compile(r"=")
     for item in tokenized:
-        field, expression = re.split(regex_query, item)
-        expression = f"^{expression}$"
+        if "!=" in item:
+            regex_query = re.compile(r"!=")
+            field, expression = re.split(regex_query, item)
+            expression = fr"^((?!{expression}).)*$"
+        else:
+            regex_query = re.compile(r"=")
+            field, expression = re.split(regex_query, item)
+            expression = fr"^{expression}$"
         expression = re.compile(expression.replace("'", ""))
         queries.append((field, expression))
 
     return queries
 
-def check_if_match(annotation, query):
+def check_if_token_matches(annotation, query):
     result = re.match(query, annotation)
     if result:
         return True
@@ -66,56 +71,48 @@ def check_if_match(annotation, query):
         return False
 
 
-def filter_sent(segments, filter):
-    field, regexp = filter.replace("[", "").replace("]", "").split("=")
-    print(regexp)
-    print(field)
-    regexp = re.compile(fr"^{regexp}$")
-    for segment in segments:
-        annotations = segment['annotations']
-        print(annotations)
-        if any([re.match(filter, token[field]) for token in annotations]):
-            print("It's a match !")
-            print([re.match(filter, token[field]) for token in annotations])
-            return True
-    return False
 
-
-def iter_over_sentence(sentence, pattern):
+def check_if_segment_matches(sentence, pattern, debug=False):
     pattern = process_query(pattern)
+    if debug:
+        print(pattern)
     if sentence == []:
         return
     match = False
     index = 0
     pattern_index_match = 0
     while not match:
+        # Si on matche le nombre d'éléments de la requête, on a un match
         if pattern_index_match == len(pattern):
             return True
+        # Si on est à la fin de la phrase, on n'aura pas de match
         elif index + 1 == len(sentence):
-            return
+            return False
         current_state = sentence[index]
         field, query = pattern[pattern_index_match]
-        if check_if_match(current_state[field], query):
+        if debug:
+            print(current_state[field])
+            print(check_if_token_matches(current_state[field], query))
+        if check_if_token_matches(current_state[field], query):
             pattern_index_match += 1
             index += 1
         else:
+            # On revient à 0 si le match n'est pas bon, en passant au mot suivant
             pattern_index_match = 0
             index += 1
 
-def contains(annotation, query):
-    print()
 
 def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter="", reduce=1):
     results_name = f"{query}"
     corresp_sents = {}
     result = []
     for idx, (ident, node) in enumerate(source_nodes["idents"].items()):
-        if iter_over_sentence(node['annotations'], query):
+        if check_if_segment_matches(node['annotations'], query):
             # if check_if_path_matches(node['sent'], node['annotations'], processed_query, matches=0, matches_number=len(processed_query), match_first=False):
             corresponding_sents = [target_nodes["idents"][corr] for corr in node['corresp']]
             # Adapter la fonction de filtre
             all_corresp_annotations = [annotation for corr in node['corresp'] for annotation in target_nodes["idents"][corr]['annotations']]
-            if not iter_over_sentence(all_corresp_annotations, filter):
+            if not check_if_segment_matches(all_corresp_annotations, filter):
                 continue
             first_source_node_id = ident
             index = next(idx for idx, id in enumerate(source_nodes["ids"]) if id == first_source_node_id)
@@ -379,8 +376,8 @@ def main(source,
         lemmatisation(source, lang, out_dir)
     source_as_tree = ET.parse(source)
     target_as_tree = ET.parse(target)
-    # nodes_source = tree_to_dict_of_nodes(source_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/source.json")
-    # nodes_target = tree_to_dict_of_nodes(target_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/target.json")
+    nodes_source = tree_to_dict_of_nodes(source_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/source.json")
+    nodes_target = tree_to_dict_of_nodes(target_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/target.json")
 
     with open("/home/mgl/Documents/source.json", "r") as input_source:
         nodes_source = json.load(input_source)
