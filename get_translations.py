@@ -8,6 +8,7 @@ import collections
 import torch
 import argparse
 import pandas as pd
+import copy
 
 tei_namespace = 'http://www.tei-c.org/ns/1.0'
 ns_decl = {'tei': tei_namespace}
@@ -31,8 +32,8 @@ def tree_to_dict_of_nodes(tree: ET._ElementTree, window, minimal_element, save_a
         morph = [token.xpath("@morph")[0] if len(token.xpath("@morph")) != 0 else '' for token in all_tokens]
         text = [token.text for token in all_tokens]
         annotations = []
-        for form, lemma, pos, morph in list(zip(text, lemmas, pos, morph)):
-            annotations.append({"form": form, "lemma": lemma, "pos": pos, "morph": morph})
+        for word, lemma, pos, morph in list(zip(text, lemmas, pos, morph)):
+            annotations.append({"word": word, "lemma": lemma, "pos": pos, "morph": morph})
         current_tokens = " ".join(
             clause.xpath("descendant::node()[self::tei:pc or self::tei:w]/descendant::text()", namespaces=ns_decl))
         dictionnary["idents"][ident] = {"corresp": corresp, "sent": current_tokens, "annotations": annotations,
@@ -46,22 +47,53 @@ def process_query(query="[pos='AQ.*'][pos='NC.*']"):
     """
     Implémentation d'un parseur CQL. Pour l'instant, ne gère que des requêtes simples (pas de répétition, *+{})
     """
+    print(query)
     all_tokens = re.compile(r"\[([^\]\[]+)\]")
     tokenized = [item for item in re.split(all_tokens, query) if item != ""]
+    print(tokenized)
     queries = []
     for item in tokenized:
-        if "!=" in item:
-            regex_query = re.compile(r"!=")
-            field, expression = re.split(regex_query, item)
-            expression = fr"^((?!{expression}).)*$"
+        if "[]" in item:
+            range_expression = re.compile(r"\{(\d*,\d*)\}")
+            ranges = re.search(range_expression, item)
+            minimal, maximal = ranges.group(1).split(",")
+            if minimal != "" and maximal != "":
+                as_range = range(int(minimal), int(maximal))
+            elif minimal == "" and maximal != "":
+                as_range = range(0, int(maximal))
+            elif minimal != "" and maximal == "":
+                print("Max distance set to 20.")
+                as_range = range(int(minimal), 20)
+            else:
+                print("Max distance set to 20.")
+                as_range = range(0, 20)
+            queries.append(as_range)
         else:
-            regex_query = re.compile(r"=")
-            field, expression = re.split(regex_query, item)
-            expression = fr"^{expression}$"
-        expression = re.compile(expression.replace("'", ""))
-        queries.append((field, expression))
+            if "!=" in item:
+                regex_query = re.compile(r"!=")
+                field, expression = re.split(regex_query, item)
+                expression = fr"^((?!{expression}).)*$"
+            else:
+                regex_query = re.compile(r"=")
+                field, expression = re.split(regex_query, item)
+                expression = fr"^{expression}$"
+            expression = re.compile(expression.replace("'", ""))
+            queries.append((field, expression))
 
-    return queries
+    out_queries = []
+    # Essayons de produire toutes les requêtes possibles
+    if any(isinstance(item, range) for item in queries):
+        actual_range = next(item for item in queries if isinstance(item, range))
+        for n in actual_range:
+            copy_query = copy.deepcopy(queries)
+            empty_vals = [() for item in range(n)]
+            copy_query[copy_query.index(actual_range):copy_query.index(actual_range) + 1] = empty_vals
+            out_queries.append(copy_query)
+    else:
+        out_queries.append(queries)
+
+
+    return out_queries
 
 def check_if_token_matches(annotation, query):
     result = re.match(query, annotation)
@@ -72,39 +104,48 @@ def check_if_token_matches(annotation, query):
 
 
 
-def check_if_segment_matches(sentence, pattern, debug=False):
-    pattern = process_query(pattern)
+def check_if_segment_matches(sentence, patterns, debug=False):
     if debug:
-        print(pattern)
+        print(patterns)
     if sentence == []:
         return
     match = False
-    index = 0
-    pattern_index_match = 0
-    while not match:
-        # Si on matche le nombre d'éléments de la requête, on a un match
-        if pattern_index_match == len(pattern):
-            return True
-        # Si on est à la fin de la phrase, on n'aura pas de match
-        elif index + 1 == len(sentence):
-            return False
-        current_state = sentence[index]
-        field, query = pattern[pattern_index_match]
-        if debug:
-            print(current_state[field])
-            print(check_if_token_matches(current_state[field], query))
-        if check_if_token_matches(current_state[field], query):
-            pattern_index_match += 1
-            index += 1
-        else:
-            # On revient à 0 si le match n'est pas bon, en passant au mot suivant
-            pattern_index_match = 0
-            index += 1
+    for idx, pattern in enumerate(patterns):
+        index = 0
+        pattern_index_match = 0
+        while not match:
+            # Si on matche le nombre d'éléments de la requête, on a un match
+            if pattern_index_match == len(pattern):
+                return True
+            # Si on est à la fin de la phrase, on n'aura pas de match
+            else:
+                if index + 1 == len(sentence) and idx + 1 == len(patterns):
+                    return False
+                elif index + 1 == len(sentence) and idx + 1 != len(patterns):
+                    break
+            current_state = sentence[index]
+            try:
+                field, query = pattern[pattern_index_match]
+            except ValueError:
+                pattern_index_match += 1
+                index += 1
+                continue
+            if debug:
+                print(current_state[field])
+                print(check_if_token_matches(current_state[field], query))
+            if check_if_token_matches(current_state[field], query):
+                pattern_index_match += 1
+                index += 1
+            else:
+                # On revient à 0 si le match n'est pas bon, en passant au mot suivant
+                pattern_index_match = 0
+                index += 1
 
 
 def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter="", reduce=1):
     results_name = f"{query}"
     corresp_sents = {}
+    query = process_query(query)
     result = []
     for idx, (ident, node) in enumerate(source_nodes["idents"].items()):
         if check_if_segment_matches(node['annotations'], query):
@@ -112,7 +153,7 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
             corresponding_sents = [target_nodes["idents"][corr] for corr in node['corresp']]
             # Adapter la fonction de filtre
             all_corresp_annotations = [annotation for corr in node['corresp'] for annotation in target_nodes["idents"][corr]['annotations']]
-            if not check_if_segment_matches(all_corresp_annotations, filter):
+            if filter != "" and not check_if_segment_matches(all_corresp_annotations, filter):
                 continue
             first_source_node_id = ident
             index = next(idx for idx, id in enumerate(source_nodes["ids"]) if id == first_source_node_id)
@@ -232,7 +273,7 @@ def normalize_spelling(text_file):
         list_of_words = {index: line.replace('\n', '') for index, line in
                          enumerate(input_text_file.readlines())}
 
-    text = "\n".join([form for index, form in list_of_words.items()])
+    text = "\n".join([word for index, word in list_of_words.items()])
     for orig, reg in normalisation.items():
         text = text.replace(orig, reg)
 
@@ -248,15 +289,15 @@ def lemmatisation(fichier, langue, out_dir):
         :param temoin: le temoin à lemmatiser
         :param division: la division à traiter
         """
-    moteur_transformation = "scripts/saxon9he.jar"
+    moteur_transwordation = "scripts/saxon9he.jar"
     fichier_sans_extension = fichier.split("/")[-1].replace(".xml", "")
     print(fichier_sans_extension)
-    fichier_xsl = "scripts/transformation_pre_lemmatisation.xsl"
+    fichier_xsl = "scripts/transwordation_pre_lemmatisation.xsl"
     chemin_vers_fichier = fichier
     fichier_sortie_txt = f'{out_dir}/{fichier_sans_extension}.tokenized.txt'
     param_sortie = f"sortie={fichier_sortie_txt}"
     subprocess.run(["java", "-jar",
-                    moteur_transformation,
+                    moteur_transwordation,
                     chemin_vers_fichier,
                     fichier_xsl,
                     param_sortie])
@@ -344,9 +385,9 @@ def lemmatisation(fichier, langue, out_dir):
 
 def txt_to_liste(filename):
     """
-    Transforme le fichier txt produit par Freeling ou pie en liste de listes pour processage ultérieur.
-    :param filename: le nom du fichier txt à transformer
-    :return: une liste de listes: pour chaque forme, les différentes analyses
+    Transworde le fichier txt produit par Freeling ou pie en liste de listes pour processage ultérieur.
+    :param filename: le nom du fichier txt à transworder
+    :return: une liste de listes: pour chaque worde, les différentes analyses
     """
     output_list = []
     fichier = open(filename, 'r')
@@ -376,8 +417,8 @@ def main(source,
         lemmatisation(source, lang, out_dir)
     source_as_tree = ET.parse(source)
     target_as_tree = ET.parse(target)
-    nodes_source = tree_to_dict_of_nodes(source_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/source.json")
-    nodes_target = tree_to_dict_of_nodes(target_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/target.json")
+    # nodes_source = tree_to_dict_of_nodes(source_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/source.json")
+    # nodes_target = tree_to_dict_of_nodes(target_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/target.json")
 
     with open("/home/mgl/Documents/source.json", "r") as input_source:
         nodes_source = json.load(input_source)
