@@ -47,10 +47,10 @@ def process_query(query="[pos='AQ.*'][pos='NC.*']"):
     """
     Implémentation d'un parseur CQL. Pour l'instant, ne gère que des requêtes simples (pas de répétition, *+{})
     """
-    print(query)
+    query = query.replace("\[", "$$$").replace("\]", "^^^")
     all_tokens = re.compile(r"\[([^\]\[]+)\]")
     tokenized = [item for item in re.split(all_tokens, query) if item != ""]
-    print(tokenized)
+    tokenized = [item.replace("$$$", "[").replace("^^^", "]") for item in tokenized]
     queries = []
     for item in tokenized:
         if "[]" in item:
@@ -79,7 +79,6 @@ def process_query(query="[pos='AQ.*'][pos='NC.*']"):
                 expression = fr"^{expression}$"
             expression = re.compile(expression.replace("'", ""))
             queries.append((field, expression))
-
     out_queries = []
     # Essayons de produire toutes les requêtes possibles
     if any(isinstance(item, range) for item in queries):
@@ -119,13 +118,16 @@ def check_if_segment_matches(sentence, patterns, debug=False):
                 return True
             # Si on est à la fin de la phrase, on n'aura pas de match
             else:
+                # Dernier mot, dernière query
                 if index + 1 == len(sentence) and idx + 1 == len(patterns):
                     return False
+                # Dernier mot mais il reste des requêtes
                 elif index + 1 == len(sentence) and idx + 1 != len(patterns):
                     break
             current_state = sentence[index]
             try:
                 field, query = pattern[pattern_index_match]
+            # ValueError == query = (): on considère que la requête est OK et on passe au mot suivant
             except ValueError:
                 pattern_index_match += 1
                 index += 1
@@ -142,10 +144,17 @@ def check_if_segment_matches(sentence, patterns, debug=False):
                 index += 1
 
 
-def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter="", reduce=1):
-    results_name = f"{query}"
+def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter="", negative_filter="", reduce=1):
+    if filter != "":
+        results_name = f"{query}-{filter}"
+    elif negative_filter != "":
+        results_name = f"{query}-not({negative_filter})"
+    else:
+        results_name = f"{query}"
     corresp_sents = {}
     query = process_query(query)
+    filter = process_query(filter)
+    negative_filter = process_query(negative_filter)
     result = []
     for idx, (ident, node) in enumerate(source_nodes["idents"].items()):
         if check_if_segment_matches(node['annotations'], query):
@@ -154,6 +163,8 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
             # Adapter la fonction de filtre
             all_corresp_annotations = [annotation for corr in node['corresp'] for annotation in target_nodes["idents"][corr]['annotations']]
             if filter != "" and not check_if_segment_matches(all_corresp_annotations, filter):
+                continue
+            if negative_filter != "" and check_if_segment_matches(all_corresp_annotations, negative_filter):
                 continue
             first_source_node_id = ident
             index = next(idx for idx, id in enumerate(source_nodes["ids"]) if id == first_source_node_id)
@@ -177,7 +188,10 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
             first_corresp_index = next(idx for idx, id in enumerate(target_nodes["ids"]) if id == first_target_node_id)
             last_corresp_index = next(idx for idx, id in enumerate(target_nodes["ids"]) if id == last_target_node_id)
             previous_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["sent"] for rolling_idx in range(first_corresp_index - window, first_corresp_index)])
-            next_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["sent"] for rolling_idx in range(last_corresp_index + 1, last_corresp_index + 1 + window)])
+            try:
+                next_target_nodes = " ".join([target_nodes["idents"][target_nodes["ids"][rolling_idx]]["sent"] for rolling_idx in range(last_corresp_index + 1, last_corresp_index + 1 + window)])
+            except IndexError:
+                next_target_nodes = ""
             corresponding_sents_as_txt = " | ".join([sent["sent"] for sent in corresponding_sents])
             corresponding_sents_with_context = previous_target_nodes + " <b> " + corresponding_sents_as_txt + " </b> " + next_target_nodes
 
@@ -408,6 +422,7 @@ def main(source,
          out_dir,
          minimal_element,
          filter,
+         negative_filter,
          reduce):
     try:
         os.mkdir(out_dir)
@@ -432,6 +447,7 @@ def main(source,
                     query=query,
                     out_dir=out_dir,
                     filter=filter,
+                    negative_filter=negative_filter,
                     reduce=reduce)
     # print(nodes_source)
 
@@ -454,6 +470,8 @@ if __name__ == '__main__':
                         help="Élément servant à l'alignement du corpus.")
     parser.add_argument("-f", "--filter", default="",
                         help="Filtre sur la cible.")
+    parser.add_argument("-nf", "--negative-filter", default="",
+                        help="Filtre négatif sur la cible.")
     parser.add_argument("-r", "--reduce", default="1",
                         help="Ne retenir que la proportion proposée d'exemples.")
     parser.add_argument('--lemmatize', action=argparse.BooleanOptionalAction)
@@ -463,6 +481,7 @@ if __name__ == '__main__':
     target = args.target
     query = args.query
     filter = args.filter
+    negative_filter = args.negative_filter
     minimal_element = args.minimal_element
     window = int(args.window)
     lang = args.lang
@@ -478,4 +497,5 @@ if __name__ == '__main__':
          out_dir=out_dir,
          minimal_element=minimal_element,
          filter=filter,
+         negative_filter=negative_filter,
          reduce=reduce)
