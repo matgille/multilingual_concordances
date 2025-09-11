@@ -55,7 +55,6 @@ def process_query(query="[pos='AQ.*'][pos='NC.*']"):
     print(tokenized)
     for idx, item in enumerate(tokenized):
         if idx + 1 != len(tokenized) and tokenized[idx + 1] == "|":
-            print("Alternative found")
             alternative = [tokenized[idx], tokenized[idx + 2]]
             regexped_alternative = []
             for i in alternative:
@@ -67,7 +66,6 @@ def process_query(query="[pos='AQ.*'][pos='NC.*']"):
             queries.append(regexped_alternative)
             tokenized.pop(idx + 1)
             tokenized.pop(idx + 1)
-            print(queries)
             continue
         if "[]" in item:
             range_expression = re.compile(r"\{(\d*,\d*)\}")
@@ -95,11 +93,9 @@ def process_query(query="[pos='AQ.*'][pos='NC.*']"):
                 expression = fr"^{expression}$"
             expression = re.compile(expression.replace("'", ""))
             queries.append((field, expression))
-    print(queries)
     out_queries = []
     # Essayons de produire toutes les requêtes possibles
     if any(isinstance(item, list) for item in queries):
-        print(f"Tuple found: {next(item for item in queries if isinstance(item, list))}")
         actual_range = next(item for item in queries if isinstance(item, list))
         copy_query_a = copy.deepcopy(queries)
         copy_query_b = copy.deepcopy(queries)
@@ -464,7 +460,11 @@ def main(source,
          minimal_element,
          filter,
          negative_filter,
-         reduce):
+         reduce,
+         create_json_dict):
+
+    source_as_json = source.replace(".xml", ".json")
+    target_as_json = target.replace(".xml", ".json")
     try:
         os.mkdir(out_dir)
     except FileExistsError:
@@ -473,13 +473,14 @@ def main(source,
         lemmatisation(source, lang, out_dir)
     source_as_tree = ET.parse(source)
     target_as_tree = ET.parse(target)
-    # nodes_source = tree_to_dict_of_nodes(source_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/source.json")
-    # nodes_target = tree_to_dict_of_nodes(target_as_tree, window=window, minimal_element=minimal_element, save_as="/home/mgl/Documents/target.json")
-
-    with open("/home/mgl/Documents/source.json", "r") as input_source:
-        nodes_source = json.load(input_source)
-    with open("/home/mgl/Documents/target.json", "r") as input_target:
-        nodes_target = json.load(input_target)
+    if create_json_dict:
+        nodes_source = tree_to_dict_of_nodes(source_as_tree, window=window, minimal_element=minimal_element, save_as=source_as_json)
+        nodes_target = tree_to_dict_of_nodes(target_as_tree, window=window, minimal_element=minimal_element, save_as=target_as_json)
+    else:
+        with open(source_as_json, "r") as input_source:
+            nodes_source = json.load(input_source)
+        with open(target_as_json, "r") as input_target:
+            nodes_target = json.load(input_target)
 
 
     match_all_nodes(nodes_source,
@@ -515,7 +516,8 @@ if __name__ == '__main__':
                         help="Filtre négatif sur la cible.")
     parser.add_argument("-r", "--reduce", default="1",
                         help="Ne retenir que la proportion proposée d'exemples.")
-    parser.add_argument('--lemmatize', action=argparse.BooleanOptionalAction)
+    parser.add_argument('--lemmatize', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--create_json', action=argparse.BooleanOptionalAction, default=False)
     args = parser.parse_args()
     source = args.source
     out_dir = args.out_dir
@@ -528,6 +530,7 @@ if __name__ == '__main__':
     lang = args.lang
     reduce = float(args.reduce)
     lemmatize = args.lemmatize
+    create_json_dict = args.create_json
 
     main(source=source,
          target=target,
@@ -539,4 +542,5 @@ if __name__ == '__main__':
          minimal_element=minimal_element,
          filter=filter,
          negative_filter=negative_filter,
-         reduce=reduce)
+         reduce=reduce,
+         create_json_dict=create_json_dict)
