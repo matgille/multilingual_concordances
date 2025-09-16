@@ -53,8 +53,7 @@
 
     <xsl:template match="tei:pc[text() = '.']">
         <xsl:value-of select="."/>
-        <xsl:text>&#xA;</xsl:text>
-        <!--<xsl:text>&#xA;&#xA;</xsl:text>-->
+        <xsl:text>&#xA;&#xA;</xsl:text>
     </xsl:template>
 </xsl:stylesheet>
 
