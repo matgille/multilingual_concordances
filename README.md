@@ -61,6 +61,25 @@ Forms, lemmas, pos and morph can be queried with a basic CQL parser:
 This command produces a concordance table taking the text `Val_S.xml` as source, with a context of 1 segment left and right for source and target, and extracts all the segments
 with an anteposed adjective.
 
+### Filtering
+
+Positive filtering is possible: 
+
+```
+python3 get_translations.py -t test_data/Val_S.xml -s test_data/Rome_W.xml -o new_alignement_2/ -me cl -q "[lemma='monarchia']" -f "[lemma='monarquía']" -w 1
+```
+
+For all sentences that contain the lemma `monarchia` in source sentence and where lemma `monarquía` in is target (castilian) sentence. 
+In human language, it helps detecting all litteral translations of the lemma `monarquia`.
+
+
+The negative filter works the same way:
+```
+python3 get_translations.py -t test_data/Val_S.xml -s test_data/Rome_W.xml -o new_alignement_2/ -me cl -q "[lemma='monarchia']" -nf "[lemma='monarquía']" -w 1
+```
+
+For all sentences that contain the lemma `monarchia` in source sentence, and where lemma `monarquía` is not in aligned target sentence.
+This query detects all non litteral translations of lemma `monarchia`.
 
 
 ## Output

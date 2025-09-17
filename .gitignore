@@ -1,1 +1,5 @@
 venv/
+.idea
+data/
+new_alignment*/
+results/
