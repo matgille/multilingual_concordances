@@ -9,7 +9,8 @@ import torch
 import argparse
 import pandas as pd
 import copy
-import CQLEngine.functions as CQLEngine
+import corpus_query_language as CQL
+
 
 tei_namespace = 'http://www.tei-c.org/ns/1.0'
 ns_decl = {'tei': tei_namespace}
@@ -185,25 +186,17 @@ def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_res
     if negative_filter != "":
         results_name += f"-not({negative_filter})"
     corresp_sents = {}
-    # query = process_query(query)
-    if filter != "":
-        filter = process_query(filter)
-    if negative_filter != "":
-        negative_filter = process_query(negative_filter)
     result = []
-    CQLParser = CQLEngine.CQLEngine()
+    CQLParser = CQL.core.CQLEngine()
     for idx, (ident, node) in enumerate(source_nodes["idents"].items()):
         corresp_segments = ', '.join(node['corresp'])
-        print(query)
-        if CQLParser.match(node['annotations'], query, debug=False):
-        # if check_if_segment_matches(node['annotations'], query):
-            # if check_if_path_matches(node['sent'], node['annotations'], processed_query, matches=0, matches_number=len(processed_query), match_first=False):
+        if CQLParser.match(node['annotations'], query, verbose=False, debug=False):
             corresponding_sents = [target_nodes["idents"][corr] for corr in node['corresp']]
             # Adapter la fonction de filtre
             all_corresp_annotations = [annotation for corr in node['corresp'] for annotation in target_nodes["idents"][corr]['annotations']]
-            if filter != "" and not check_if_segment_matches(all_corresp_annotations, filter):
+            if filter != "" and not CQLParser.match(all_corresp_annotations, filter, verbose=False, debug=False):
                 continue
-            if negative_filter != "" and check_if_segment_matches(all_corresp_annotations, negative_filter):
+            if negative_filter != "" and CQLParser.match(all_corresp_annotations, negative_filter, verbose=False, debug=False):
                 continue
 
             first_source_node_id = ident
