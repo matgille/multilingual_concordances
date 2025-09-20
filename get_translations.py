@@ -340,15 +340,15 @@ def lemmatisation(fichier, langue, out_dir):
         :param temoin: le temoin à lemmatiser
         :param division: la division à traiter
         """
-    moteur_transwordation = "scripts/saxon9he.jar"
+    moteur_transformation = "scripts/saxon9he.jar"
     fichier_sans_extension = fichier.split("/")[-1].replace(".xml", "")
     print(fichier_sans_extension)
-    fichier_xsl = "scripts/transwordation_pre_lemmatisation.xsl"
+    fichier_xsl = "scripts/transformation_pre_lemmatisation.xsl"
     chemin_vers_fichier = fichier
     fichier_sortie_txt = f'{out_dir}/{fichier_sans_extension}.tokenized.txt'
     param_sortie = f"sortie={fichier_sortie_txt}"
     subprocess.run(["java", "-jar",
-                    moteur_transwordation,
+                    moteur_transformation,
                     chemin_vers_fichier,
                     fichier_xsl,
                     param_sortie])
@@ -368,7 +368,7 @@ def lemmatisation(fichier, langue, out_dir):
     tokens = root.xpath(groupe_words, namespaces=ns_decl)
     with open(fichier_sortie_txt, "w") as output_file:
         output_file.write("\n".join([token.text.replace("\n", "") for token in tokens]))
-
+        
     if langue == "es":
         normalize_spelling(fichier_sortie_txt)
         fichier_normalise = f'{out_dir}/{fichier_sans_extension}.tokenized.normalized.txt'
@@ -400,11 +400,12 @@ def lemmatisation(fichier, langue, out_dir):
 
     elif langue == "la":
         modele_latin = "scripts/model.tar"
+        modele_voice = "scripts/model_voice.tar"
+        print(fichier_sortie_txt)
         device = torch.device("cuda") if torch.cuda.is_available() else "cpu"
         cmd = f"pie tag --device {device} {fichier_sortie_txt} " \
-              f"<{modele_latin},lemma,pos,Person,Numb,Tense,Case,Mood>  --batch_size 2048"
-        print(cmd)
-        subprocess.run(cmd.split())
+              f"<{modele_latin},lemma,pos,Person,Numb,Case><{modele_voice},Mood_Tense_Voice>  --batch_size 2048"
+        # subprocess.run(cmd.split())
         fichier_seul = os.path.splitext(fichier_sortie_txt)[0]
         fichier_lemmatise = str(fichier_seul) + "-pie.txt"
         maliste = txt_to_liste(fichier_lemmatise)
@@ -412,10 +413,9 @@ def lemmatisation(fichier, langue, out_dir):
         maliste.pop(0)  # on supprime les titres de colonne
         for index, mot in enumerate(tokens):
             liste_correcte = maliste[index]
-            _, cas, mode, nombre, personne, temps, lemme, pos, *autres_arguments = liste_correcte
-
+            _, cas, mode, temps, voix, nombre, personne, lemme, pos, *autres_arguments = liste_correcte
             # on nettoie la morphologie pour supprimer les entrées vides
-            morph = f"CAS={cas}|MODE={mode}|NOMB.={nombre}|PERS.={personne}|TEMPS={temps}"
+            morph = f"CAS={cas}|NOMB.={nombre}|PERS.={personne}|TEMPS={temps}||MODE={mode}|VOIX={voix}"
             morph = re.sub("((?!\|).)*?_(?=\|)", "", morph)  # on supprime les pipes non renseignés du milieu
             morph = re.sub("^\|*", "", morph)  # on supprime les pipes qui commencent la valeur
             morph = re.sub("(\|)+", "|", morph)  # on supprime les pipes suivis
@@ -445,8 +445,10 @@ def txt_to_liste(filename):
     for ligne in fichier.readlines():
         if not re.match(r'^\s*$',
                         ligne):  # https://stackoverflow.com/a/3711884 élimination des lignes vides (séparateur de phrase)
-            ligne_splittee = re.split(r'\s+', ligne)
-            output_list.append(ligne_splittee)
+            ligne_splittee = re.split(r'[\s+\|]', ligne)
+            if ligne_splittee[2] == '_':
+                ligne_splittee[2:3] = ["_", "_", "_"]
+            output_list.append(ligne_splittee[:-1])
     return output_list
 
 
@@ -470,6 +472,7 @@ def main(source,
     except FileExistsError:
         pass
     if lemmatize:
+        print("Lemmatizing")
         lemmatisation(source, lang, out_dir)
     source_as_tree = ET.parse(source)
     target_as_tree = ET.parse(target)
