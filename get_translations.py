@@ -45,138 +45,7 @@ def tree_to_dict_of_nodes(tree: ET._ElementTree, window, minimal_element, save_a
         json.dump(dictionnary, output_json)
     return dictionnary
 
-def process_query(query="[pos='AQ.*'][pos='NC.*']"):
-    """
-    Implémentation d'un parseur CQL. Pour l'instant, ne gère que des requêtes simples
-    """
-    query = query.replace("\[", "$$$").replace("\]", "^^^")
-    all_tokens = re.compile(r"\[([^\]\[]+)\]")
-    tokenized = [item for item in re.split(all_tokens, query) if item != ""]
-    tokenized = [item.replace("$$$", "[").replace("^^^", "]") for item in tokenized]
-    queries = []
-    print(tokenized)
-    for idx, item in enumerate(tokenized):
-        if idx + 1 != len(tokenized) and tokenized[idx + 1] == "|":
-            alternative = [tokenized[idx], tokenized[idx + 2]]
-            regexped_alternative = []
-            for i in alternative:
-                regex_query = re.compile(r"=")
-                field, expression = re.split(regex_query, i)
-                expression = fr"^{expression}$"
-                expression = re.compile(expression.replace("'", ""))
-                regexped_alternative.append((field, expression))
-            queries.append(regexped_alternative)
-            tokenized.pop(idx + 1)
-            tokenized.pop(idx + 1)
-            continue
-        if "[]" in item:
-            range_expression = re.compile(r"\{(\d*,\d*)\}")
-            ranges = re.search(range_expression, item)
-            minimal, maximal = ranges.group(1).split(",")
-            if minimal != "" and maximal != "":
-                as_range = range(int(minimal), int(maximal))
-            elif minimal == "" and maximal != "":
-                as_range = range(0, int(maximal))
-            elif minimal != "" and maximal == "":
-                print("Max distance set to 20.")
-                as_range = range(int(minimal), 20)
-            else:
-                print("Max distance set to 20.")
-                as_range = range(0, 20)
-            queries.append(as_range)
-        else:
-            if "!=" in item:
-                regex_query = re.compile(r"!=")
-                field, expression = re.split(regex_query, item)
-                expression = fr"^((?!{expression}).)*$"
-            else:
-                regex_query = re.compile(r"=")
-                field, expression = re.split(regex_query, item)
-                expression = fr"^{expression}$"
-            expression = re.compile(expression.replace("'", ""))
-            queries.append((field, expression))
-    out_queries = []
-    # Essayons de produire toutes les requêtes possibles
-    if any(isinstance(item, list) for item in queries):
-        actual_range = next(item for item in queries if isinstance(item, list))
-        copy_query_a = copy.deepcopy(queries)
-        copy_query_b = copy.deepcopy(queries)
-        alternative_a = actual_range[0]
-        alternative_b = actual_range[1]
-        copy_query_a[copy_query_a.index(actual_range)] = alternative_a
-        copy_query_b[copy_query_b.index(actual_range)] = alternative_b
-        out_queries.append(copy_query_a)
-        out_queries.append(copy_query_b)
-    elif any(isinstance(item, range) for item in queries):
-        actual_range = next(item for item in queries if isinstance(item, range))
-        for n in actual_range:
-            copy_query = copy.deepcopy(queries)
-            empty_vals = [() for item in range(n)]
-            copy_query[copy_query.index(actual_range):copy_query.index(actual_range) + 1] = empty_vals
-            out_queries.append(copy_query)
-    else:
-        out_queries.append(queries)
-    return out_queries
 
-def check_if_token_matches(annotation, query):
-    result = re.match(query, annotation)
-    if result:
-        return True
-    else:
-        return False
-
-
-
-def check_if_segment_matches(sentence, patterns, debug=False):
-    if debug:
-        print(f"Sentence: {sentence}")
-        print(f"Patterns: {patterns}")
-    if sentence == []:
-        return
-
-    # Le dernier token n'est pas reconnu, on va artificiellement en ajouter un.
-    sentence = sentence + [{}]
-    match = False
-    for idx_pattern, pattern in enumerate(patterns):
-        index = 0
-        pattern_index_match = 0
-        while not match:
-            # Si on matche le nombre d'éléments de la requête, on a un match
-            if pattern_index_match == len(pattern):
-                if debug:
-                    print("It's a match")
-                return True
-            # Si on est à la fin de la phrase, on n'aura pas de match
-            else:
-                # Dernier mot, dernière query
-                if index + 1 == len(sentence) and idx_pattern + 1 == len(patterns):
-                    if debug:
-                        print(sentence[index])
-                        print("End of sentence. Exiting with no result")
-                    return False
-                # Dernier mot mais il reste des requêtes
-                elif index + 1 == len(sentence) and idx_pattern + 1 != len(patterns):
-                    if debug:
-                        print("Break")
-                    break
-            current_state = sentence[index]
-            try:
-                field, query = pattern[pattern_index_match]
-            # ValueError == query = (): on considère que la requête est OK et on passe au mot suivant
-            except ValueError:
-                pattern_index_match += 1
-                index += 1
-                continue
-            if debug:
-                print(current_state[field])
-                print(check_if_token_matches(current_state[field], query))
-            if check_if_token_matches(current_state[field], query):
-                pattern_index_match += 1
-                index += 1
-            else:
-                # On revient à 0 si le match n'est pas bon, en passant au mot suivant
-                pattern_index_match = 0
-                index += 1
 
 
 def match_all_nodes(source_nodes, target_nodes, query, window, out_dir="test_results", filter="", negative_filter="", reduce=1, debug=False):
@@ -414,6 +283,7 @@ def lemmatisation(fichier, langue, out_dir):
         for index, mot in enumerate(tokens):
             liste_correcte = maliste[index]
             _, cas, mode, temps, voix, nombre, personne, lemme, pos, *autres_arguments = liste_correcte
+            assert len(liste_correcte) == 9, "Length error"
             # on nettoie la morphologie pour supprimer les entrées vides
             morph = f"CAS={cas}|NOMB.={nombre}|PERS.={personne}|TEMPS={temps}||MODE={mode}|VOIX={voix}"
             morph = re.sub("((?!\|).)*?_(?=\|)", "", morph)  # on supprime les pipes non renseignés du milieu
